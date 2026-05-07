@@ -21,12 +21,17 @@ class RandomlyLocalizedCP(BaseCP):
         bandwidth = 0.1,
         batch_size = 1024,
         weight_analysis_metrics = {},
+        base_method = "split",
         **kwargs
     ):
         super().__init__(**kwargs)
         self.bandwidth = bandwidth
         self.cp_method = self.rand_lcp
         self.batch_size = batch_size
+        self.base_method = base_method
+
+        if base_method == "aps":
+            assert self.task == "cls", "APS-based weighting only supports classification tasks."
         
         if len(weight_analysis_metrics.keys()) > 0:
             self.weighst_stats = {k:{"kwargs": weight_analysis_metrics[k], "stats": []} for k in weight_analysis_metrics}
@@ -65,10 +70,16 @@ class RandomlyLocalizedCP(BaseCP):
 
         n_cal, n_cls = cal_scores.shape
         if self.task == "reg":
+            test_nc_scores = np.zeros_like(test_scores)
             cal_nc_scores = np.abs(cal_labels - cal_scores).reshape(-1)
-        else:
+        elif self.task == "cls" and self.base_method == "split":
             test_nc_scores = 1 - test_scores
             cal_nc_scores = 1 - cal_scores[np.arange(n_cal), cal_labels]
+        elif self.task == "cls" and self.base_method == "aps":
+            test_nc_scores = aps_transform(test_scores)
+            cal_nc_scores = aps_transform(cal_scores)[np.arange(n_cal), cal_labels]
+        else:
+            raise ValueError(f"Unsupported task ({self.task}) and base method ({self.base_method}) combination.")
 
         cal_nc_idxs = np.argsort(cal_nc_scores)
         cal_nc_scores = cal_nc_scores[cal_nc_idxs]
@@ -208,4 +219,9 @@ class RandomlyLocalizedCP(BaseCP):
                 k: {"kwargs": v["kwargs"], "stats": [np.concatenate(v["stats"], axis=0)]} for k, v in self.weighst_stats.items()
             }
         
-        return test_conf_pred, quantile_thresh
+        outputs = {
+            "test_predictions": test_conf_pred,
+            "quantile_thresholds": quantile_thresh,
+        }
+        
+        return outputs

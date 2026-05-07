@@ -2,10 +2,12 @@ import torch, random, os, ipdb, logging
 import numpy as np
 from .base_cp import BaseCP
 from .utils import *
+from .aps import aps_transform
 from scipy.stats import multivariate_normal
 from torch_geometric.utils import homophily, subgraph
 from metrics import analyze_distribution
 from tqdm import tqdm
+from .plot_homophily_scp import compute_test_node_homophily
 
 
 logger = logging.getLogger("global_logger")
@@ -31,6 +33,8 @@ class GraphRLCP(BaseCP):
             adaptive = False,
             max_edge_ratio = None
         ),
+        report_homophily_ratio = True,
+        base_method = "split",
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -43,6 +47,11 @@ class GraphRLCP(BaseCP):
         self.convex_dist_coeff = convex_dist_coeff if convex_dist_coeff >= 0.0 else None
         self.convex_coeff_method = convex_coeff_method
         self.densification_config = densification_config
+        self.report_homophily_ratio = report_homophily_ratio
+        self.base_method = base_method
+
+        if base_method == "aps":
+            assert self.task == "cls", "APS-based weighting only supports classification tasks."
 
         if weighting_method == "convex":
             self.weighting_fn = self.get_weights_convex
@@ -423,9 +432,14 @@ class GraphRLCP(BaseCP):
         if self.task == "reg":
             test_nc_scores = np.zeros_like(test_scores)
             cal_nc_scores = np.abs(cal_labels - cal_scores).reshape(-1)
-        else:
+        elif self.task == "cls" and self.base_method == "split":
             test_nc_scores = 1 - test_scores
             cal_nc_scores = 1 - cal_scores[np.arange(n_cal), cal_labels]
+        elif self.task == "cls" and self.base_method == "aps":
+            test_nc_scores = aps_transform(test_scores)
+            cal_nc_scores = aps_transform(cal_scores)[np.arange(n_cal), cal_labels]
+        else:
+            raise ValueError(f"Unsupported task ({self.task}) and base method ({self.base_method}) combination.")
 
         cal_nc_idxs = np.argsort(cal_nc_scores)
         cal_nc_scores = cal_nc_scores[cal_nc_idxs]
@@ -450,7 +464,6 @@ class GraphRLCP(BaseCP):
         if pre_weights is not None:
             pre_weights = np.concatenate((pre_weights[cal_nc_idxs], np.ones((1,), dtype=test_nc_scores.dtype)))
 
-        edge_index = dataset._data.edge_index.clone()
         if self.densification_config["threshold"] < 1.0:
             n_init_edges = dataset._data.edge_index.shape[1]
             # dense_cutoff = 3 - 2 * self.densification_threshold  # Simplified (1 + (1-x)*2)
@@ -460,7 +473,12 @@ class GraphRLCP(BaseCP):
             min_dense_threshold = 0.01
             max_dense_threshold = 0.99
 
-            cal_edge_index, _ = subgraph(subset=cal_idxs, edge_index=dataset._data.edge_index.cpu(), relabel_nodes=True)
+            cal_edge_index, _ = subgraph(
+                subset=cal_idxs,
+                edge_index=dataset._data.edge_index.cpu(),
+                relabel_nodes=True,
+                num_nodes=num_nodes,
+            )
             homophily_ratio = graph_homophily(cal_edge_index, dataset._data.y[cal_idxs], task=self.task)
 
             if self.densification_config["max_edge_ratio"] is None:
@@ -472,9 +490,10 @@ class GraphRLCP(BaseCP):
 
             sim_mat = None
             for adapt_itr in range(max_adapt_itrs):
+                # ipdb.set_trace()
                 edge_index, edge_weight, sim_mat = get_dense_graph(
                     all_x, 
-                    dataset._data.edge_index.cpu(),
+                    dataset._data.edge_index.cpu().clone(),
                     method=self.densification_config["method"],
                     bandwidth=bandwidth, 
                     threshold=last_dense_thresh, 
@@ -485,7 +504,6 @@ class GraphRLCP(BaseCP):
                 new_edge_ratio = edge_index.shape[1] / n_init_edges
                 is_fully_connected = (edge_index.shape[1] == max_nodes_sq)
                 stat_log =  f"(edges: {new_edge_ratio:.2f}x). Homophily: {homophily_ratio:.2f}"
-                # print(max_edge_ratio, min_edge_ratio, stat_log)
 
                 if not self.densification_config["adaptive"]:
                     logger.info(f"Densification threshold fixed at {last_dense_thresh:.2f} {stat_log}")
@@ -503,8 +521,6 @@ class GraphRLCP(BaseCP):
                     # Too sparse: Decrease threshold to allow more edges
                     last_dense_thresh = max(min_dense_threshold, last_dense_thresh * 0.9)
                     action = "Decreasing"
-
-                # print(f"Edges: {new_edge_ratio:.2f}x. {action} threshold to {last_dense_thresh:.3f} and retrying.")
                 
                 if last_dense_thresh >= max_dense_threshold:
                     # logger.info(f"Reached threshold limit ({min_dense_threshold} - {max_dense_threshold}). Exiting.")
@@ -513,6 +529,11 @@ class GraphRLCP(BaseCP):
                 logger.info(f"Max attempts reached. Final threshold: {last_dense_thresh:.3f} {stat_log}")
         else:
             edge_weight = 1.0
+            self.report_homophily_ratio = False
+        
+        if self.report_homophily_ratio:
+            org_homophily_ratio = graph_homophily(dataset._data.edge_index.clone(), dataset._data.y, task=self.task)
+            next_homophily_ratio = graph_homophily(edge_index.clone(), dataset._data.y, task=self.task)
 
         node_degrees = degree(edge_index[0], num_nodes, dtype=torch.float)
 
@@ -578,4 +599,10 @@ class GraphRLCP(BaseCP):
                 k: {"kwargs": v["kwargs"], "stats": [np.concatenate(v["stats"], axis=0)]} for k, v in self.weighst_stats.items()
             }
 
-        return test_conf_pred, quantile_thresh
+        outputs = {
+            "test_predictions": test_conf_pred,
+            "quantile_thresholds": quantile_thresh,
+        }
+        outputs = outputs | {"dense_homophily_ratio": next_homophily_ratio / org_homophily_ratio} if self.report_homophily_ratio else outputs
+
+        return outputs

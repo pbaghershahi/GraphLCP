@@ -136,6 +136,7 @@ class BaseCP():
         all_outs = None,
         pre_weights = None,
         pca_config = None,
+        num_runs = 10,
         **kwargs
     ):
 
@@ -153,15 +154,15 @@ class BaseCP():
                     else:
                         all_outs[k] = v.astype(np.float32)
 
-        preds = {}
-        for i in range(10):
+        preds = {"dense_homophily_ratio": []}
+        for i in range(num_runs):
             cal_test_idxs = (~dataset._data.train_mask).nonzero().squeeze().cpu()
             perm = torch.randperm(cal_test_idxs.shape[0])
             cal_test_idxs = cal_test_idxs[perm]
             cal_idxs = cal_test_idxs[:dataset.n_cal]
             test_idxs = cal_test_idxs[dataset.n_cal:]
 
-            test_predictions, quantile_thresholds = self.cp_method(
+            cp_out_dict = self.cp_method(
                 all_outs = all_outs,
                 cal_idxs = cal_idxs,
                 test_idxs = test_idxs,
@@ -170,8 +171,8 @@ class BaseCP():
                 dataset = dataset,
                 **kwargs,
             )
-            # preds["predictions"] = test_predictions
-            # ipdb.set_trace()
+            test_predictions, quantile_thresholds = cp_out_dict["test_predictions"], cp_out_dict["quantile_thresholds"]
+
             test_x, test_labels = [all_outs[k][test_idxs.numpy()] for k in ["x", "labels"]]
             coverage, pred_length = self.compute_metrics(
                 test_predictions,
@@ -190,13 +191,9 @@ class BaseCP():
                     preds[f"{k}_coverage"].append(v)
                     preds[f"{k}_pred_length"].append(pred_length[k])
 
-        # ipdb.set_trace()
-        # avg_preds = {}
-        # for k, v, in preds.items():
-        #     avg_preds[k] = np.array(v).mean().astype(np.float32)
-        #     if v.ndim == 0:
-        #         new_preds[k] = v
+            if "dense_homophily_ratio" in cp_out_dict:
+                preds["dense_homophily_ratio"].append(cp_out_dict["dense_homophily_ratio"])
 
-        preds = {k: np.array(v).mean(axis=0).astype(np.float32) for k, v in preds.items()}
+        preds = {k: np.array(v).mean(axis=0).astype(np.float32) for k, v in preds.items() if len(v) > 0}
 
         return preds

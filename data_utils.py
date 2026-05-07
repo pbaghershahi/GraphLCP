@@ -15,7 +15,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from glob import glob
 from sklearn.decomposition import PCA
-from good_datasets import GOODHIV, GOODTwitch, GOODMotif, GOODCMNIST, GOODWebKB, GOODCBAS, GOODZINC
+from good_datasets import GOODHIV, GOODTwitch, GOODMotif, GOODCMNIST, GOODWebKB, GOODCBAS, GOODCora, GOODArxiv, GOODZINC
 from torch_scatter import scatter
 from sklearn.cluster import KMeans
 from torch_geometric.data import InMemoryDataset
@@ -200,11 +200,35 @@ class NDataset(GDataset):
         self.level = "node"
         self.task = task
         self.partition_methods = ["node_degree", "homophily", "clustering_coefficient", "feature_clustering"]
+        self.subgraph_node_idxs = None
 
 
     @property
     def x(self,):
         return self._data.x
+
+
+    def sample_random_subgraph_(self, data, subgraph_node_ratio=None, seed=1234):
+        if subgraph_node_ratio is None:
+            return data
+
+        subgraph_node_ratio = float(subgraph_node_ratio)
+        if not (0.0 < subgraph_node_ratio <= 1.0):
+            raise ValueError(
+                f"dataset_subgraph_node_ratio must be in the interval (0, 1], got {subgraph_node_ratio}."
+            )
+
+        n_total_nodes = data.x.shape[0]
+        subgraph_num_nodes = max(1, int(round(n_total_nodes * subgraph_node_ratio)))
+        if subgraph_num_nodes == n_total_nodes:
+            return data
+
+        generator = torch.Generator()
+        generator.manual_seed(int(seed))
+        node_idxs = torch.randperm(n_total_nodes, generator=generator)[:subgraph_num_nodes].sort().values
+        self.subgraph_node_idxs = node_idxs
+
+        return data.subgraph(node_idxs)
 
 
     def partition_by_node_degree(self, data, n_partitions=2, **kwargs):
@@ -376,9 +400,14 @@ class FromPyGNode(NDataset):
     ) -> None:
         super().__init__(task = task)
         graph = deepcopy(main_dataset[0])
+        graph = self.sample_random_subgraph_(
+            graph,
+            subgraph_node_ratio=init_config.get("subgraph_node_ratio"),
+            seed=init_config.get("seed", 2411),
+        )
         self.n_samples = graph.x.shape[0]
         self.n_feats = graph.x.shape[1]
-        self.n_classes = graph.y.unique().shape[0]
+        self.n_classes = main_dataset.num_classes if hasattr(main_dataset, "num_classes") else graph.y.unique().shape[0]
         self.name = name
         self.num_nsamples = self.n_samples
         self.processed_dir = main_dataset.processed_dir
@@ -649,6 +678,11 @@ class FromGOODNode(NDataset):
         task = "reg" if main_dataset[0].task == "Regression" else "cls"
         super().__init__(task, **kwargs)
         self._data = main_dataset[0][0]
+        self._data = self.sample_random_subgraph_(
+            self._data,
+            subgraph_node_ratio=init_config.get("subgraph_node_ratio"),
+            seed=init_config.get("seed", 2411),
+        )
         meta_info = main_dataset[1]
         assert self._data.x.shape[1] == meta_info.dim_node
         self.n_feats = meta_info.dim_node
@@ -658,9 +692,11 @@ class FromGOODNode(NDataset):
 
         if self.task == "reg":
             self.n_classes = meta_info.num_classes
+            self.num_nsamples = self._data.x.shape[0]
         else:
             self.num_nsamples = self._data.x.shape[0]
             self.n_classes = main_dataset[0].num_classes
+        self.n_samples = self.num_nsamples
 
         self.name = name
         self.type = meta_info.dataset_type
@@ -694,6 +730,11 @@ class FromGOODNode(NDataset):
             cal_idxs = getattr(self._data, self.cal_mask_name).nonzero().T.view(-1),
             test_idxs = getattr(self._data, self.test_mask_name).nonzero().T.view(-1),
         )
+        if self.subgraph_node_idxs is not None and min(self.n_train, self.n_cal, self.n_test) == 0:
+            raise ValueError(
+                "The sampled subgraph has an empty train, calibration, or test split. "
+                "Increase dataset_subgraph_node_ratio or use a different seed."
+            )
 
         self.n_partitions = n_partitions
         self._data.partitions = self.partitioning_func(data=self._data, n_partitions=n_partitions)
@@ -717,7 +758,7 @@ class FromGOODNode(NDataset):
                 self._data[k] = mapped_attr
 
         if (loader_config["batch_size"] > self._data.x.shape[0]) or (loader_config["train_loader_type"] not in ["graphsaint", "neighbor"]):
-            self.train_loader = DataLoader([self._data], batch_size=1, collate_fn=self.collate_fn_, num_workers=1)
+            self.train_loader = DataLoader([self._data], batch_size=1, collate_fn=self.collate_fn_, num_workers=0)
         else:
             if loader_config["train_loader_type"] == "graphsaint":
                 pattern = "graphsaintrandomwalksampler*"
@@ -739,8 +780,8 @@ class FromGOODNode(NDataset):
                     **loader_config
                 )
 
-        self.cal_loader = DataLoader([self._data], batch_size=1, collate_fn=self.collate_fn_, num_workers=1)
-        self.test_loader = DataLoader([self._data], batch_size=1, collate_fn=self.collate_fn_, num_workers=1)
+        self.cal_loader = DataLoader([self._data], batch_size=1, collate_fn=self.collate_fn_, num_workers=0)
+        self.test_loader = DataLoader([self._data], batch_size=1, collate_fn=self.collate_fn_, num_workers=0)
 
 
 
@@ -788,6 +829,13 @@ class FromCFGNNNode(FromPyGNode):
         self.processed_dir = os.path.join(main_dir, name)
 
         graph = Data(x=x, edge_index=edge_index, y=y)
+        graph = self.sample_random_subgraph_(
+            graph,
+            subgraph_node_ratio=init_config.get("subgraph_node_ratio"),
+            seed=init_config.get("seed", 2411),
+        )
+        self.num_nsamples, self.n_feats = graph.x.shape
+        self.n_samples = self.num_nsamples
         self.init_ds_idxs_(train_test_split = init_config["train_test_split"], seed = init_config["seed"])
 
         graph.train_mask = torch.as_tensor([False] * self.n_samples)
@@ -1130,7 +1178,7 @@ class GenDataset(object):
                 name = dataset_name
             )
             
-        elif dataset_name in ["GOODTwitch", "GOODWebKB", "GOODCBAS"]:
+        elif dataset_name in ["GOODTwitch", "GOODWebKB", "GOODCBAS", "GOODCora", "GOODArxiv"]:
             
             if dataset_name == "GOODTwitch":
                 ds_class = GOODTwitch
@@ -1138,6 +1186,10 @@ class GenDataset(object):
                 ds_class = GOODWebKB
             elif dataset_name == "GOODCBAS":
                 ds_class = GOODCBAS
+            elif dataset_name == "GOODCora":
+                ds_class = GOODCora
+            elif dataset_name == "GOODArxiv":
+                ds_class = GOODArxiv
 
             org_dataset = ds_class.load(
                 store_to_path, 
@@ -1187,4 +1239,3 @@ class GenDataset(object):
         #     embeds_dists = dataset_embeds_and_dists(dataset, encoder_config | {"level": dataset.level})
 
         return dataset, embeds_dists
-

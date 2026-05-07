@@ -210,4 +210,9 @@ class CalibratedLocalizedCP(BaseCP):
                 k: {"kwargs": v["kwargs"], "stats": [np.concatenate(v["stats"], axis=0)]} for k, v in self.weighst_stats.items()
             }
 
-        return test_pred_sets, quantile_thresh
+        outputs = {
+            "test_predictions": test_pred_sets,
+            "quantile_thresholds": quantile_thresh,
+        }
+        
+        return outputs

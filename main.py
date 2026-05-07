@@ -8,7 +8,7 @@ sys.path.insert(0, ROOT_PATH)
 from train_utils import *
 from utils import *
 from kmm import kernel_mean_matching_parallel
-from methods import SplitCP, RandomlyLocalizedCP, CalibratedLocalizedCP, GraphRLCP, TestCP, CFGNN
+from methods import SplitCP, RandomlyLocalizedCP, CalibratedLocalizedCP, GraphRLCP, TestCP, CFGNN, SNAPS, NAPS, APS
 from eval.utils import evaluate
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
@@ -21,6 +21,8 @@ from scipy import stats
 from model import get_model
 from iw_utils import get_weights, mmd
 from munch import Munch
+from helpers import plot_2d_embedding_scatter, plot_3d_embedding_scatter
+import time
 import ipdb
 import warnings
 warnings.filterwarnings(
@@ -31,12 +33,11 @@ warnings.filterwarnings(
 
 
 def get_parser():
-    parser = argparse.ArgumentParser(description="CertainGNN")
+    parser = argparse.ArgumentParser(description="GraphLCP")
 
     # GNN Model Args
     parser.add_argument("-gwb", "--gnn_with_bn", action="store_true")
     parser.add_argument("-gwn", "--gnn_with_nonlinearity", action="store_true")
-    parser.add_argument("-gwid", "--gnn_with_input_dropout", action="store_true")
     parser.add_argument("-gwd", "--gnn_weight_decay", type=float, help="Rate of regularization")
     parser.add_argument("-gt", "--gnn_type", type=str, help="Type of base GNN: [gcn, gat, gin, sage]")
     parser.add_argument("-gpm", "--gnn_pooling_mode", type=str, help="Type of base GNN: [gcn, gat, gin, sage]")
@@ -49,10 +50,12 @@ def get_parser():
     parser.add_argument("-gsg", "--gnn_scheduler_gamma", type=float, help="Learning rate gamma for pretraining")
     parser.add_argument("-gbs", "--gnn_batch_size", type=int, help="Batch size for pretraining")
     parser.add_argument("-gdr", "--gnn_dropout_rate", type=float, help="Dropout for GNN")
-
+    
     # Experiment / CP Args
     parser.add_argument("-tt", "--total_iters", type=int, help="Total number of trials with random initialization of datasets")
+    parser.add_argument("-nrpd", "--num_runs_per_dataset", type=int, default=10, help="Number of runs per dataset initialization")
     parser.add_argument("-m", "--method", type=str, help="CP method: [split_cp, rand_lcp, cal_lcp]")
+    parser.add_argument("-bm", "--base_method", type=str, help="CP based nonconformity scoring: [split, aps]")
     parser.add_argument("-ds", "--dataset", type=str, help="Target dataset")
     parser.add_argument("-dsd", "--dataset_domain", type=str)
     parser.add_argument("-dss", "--dataset_shift", type=str)
@@ -61,19 +64,18 @@ def get_parser():
     parser.add_argument("-dtd", "--dataset_test_domain", type=str)
     parser.add_argument("-tlt", "--train_loader_type", type=str)
     parser.add_argument("-dnp", "--dataset_n_partitions", type=int)
+    parser.add_argument("-dsr", "--dataset_subgraph_node_ratio", type=float, default=None)
     parser.add_argument("-dnm", "--data_normal_mode", type=str, help="Config file to save to")
     parser.add_argument("-pgl", "--partitioning_granularity_level", type=float)
     parser.add_argument("-nsm", "--not_save_model", action="store_true")
     parser.add_argument("-pp", "--pretrained_path", nargs="*", default=[], type=str, help="Paths to the pretrained model")
     parser.add_argument("-cpbs", "--cp_batch_size", type=int, help="Batch size for pretraining")
-    parser.add_argument("-nr", "--num_runs", type=int, help="Numer of runs per trial")
     parser.add_argument("-wnv", "--wsc_num_vectors", type=int, help="Number of vectors for wsc optimization")
     parser.add_argument("-tts", "--train_test_split", nargs="*", type=float, help="[train_percentage, test_percentage]")
     parser.add_argument("-s", "--seed", nargs="*", type=int, default=None, help="Seed for random")
     
     # Config / Logging Args
     parser.add_argument("-cff", "--config_from_file", type=str, default="", help="Config file to read from")
-    parser.add_argument("-ctf", "--config_to_file", type=str, default="", help="Config file to save to")
     parser.add_argument("-nv", "--not_verbose", action="store_true")
     parser.add_argument("-lpd", "--log_path_dir", default=None, type=str)
     parser.add_argument("-opd", "--output_path_dir", default=None, type=str)
@@ -86,7 +88,6 @@ def get_parser():
     parser.add_argument("-wdb", "--with_dynamic_bandwidth", action="store_true")
     parser.add_argument("-sos", "--sample_original_space", action="store_true")
     parser.add_argument("-itt", "--input_transformation_type", type=str)
-    parser.add_argument("-ltt", "--latent_transformation_type", type=str)
     parser.add_argument("-iwbs", "--importance_weighting_batch_size", type=int)
     parser.add_argument("-iwrf", "--importance_weighting_reg_fac", type=float)
     parser.add_argument("-iwmi", "--importance_weighting_max_iters", type=int)
@@ -96,7 +97,6 @@ def get_parser():
     parser.add_argument("-lpnc", "--latent_pca_n_components", type=int)
     parser.add_argument("-a", "--alpha", type=float, help="Alpha value")
     parser.add_argument("-b", "--bandwidth", type=float, help="Bandwidth value")
-    parser.add_argument("-ecp", "--eval_cp", action="store_true")
     parser.add_argument("-vd", "--visualize_data", action="store_true")
     parser.add_argument("-kt", "--kernel_type", type=str, help="[gaussian, ppr]")
     parser.add_argument("-pa", "--ppr_alpha", type=float)
@@ -155,23 +155,23 @@ def main(parser) -> None:
     if args.log_path_dir is None:
         log_dir = Path(ROOT_PATH) / "log/"
     else:
-        log_dir = Path(args.log_path_dir) / "CertainGNN/log"
+        log_dir = Path(args.log_path_dir) / "GraphLCP/log"
     
     if args.experiment_id is not None:
         if args.output_path_dir is None:
             ouputs_path = Path(ROOT_PATH) / "outputs" / args.experiment_id
         else:
-            ouputs_path = Path(args.output_path_dir) / "CertainGNN" / "outputs" / args.experiment_id
+            ouputs_path = Path(args.output_path_dir) / "GraphLCP" / "outputs" / args.experiment_id
     else:
         if args.output_path_dir is None:
             ouputs_path = Path(ROOT_PATH) / "outputs"
         else:
-            ouputs_path = Path(args.output_path_dir) / "CertainGNN" / "outputs"
+            ouputs_path = Path(args.output_path_dir) / "GraphLCP" / "outputs"
 
     if args.model_path_dir is None:
         models_path = Path(ROOT_PATH) / "pretrained/"
     else:
-        models_path = Path(args.model_path_dir) / "CertainGNN/pretrained"
+        models_path = Path(args.model_path_dir) / "GraphLCP/pretrained"
 
     os.makedirs(models_path, exist_ok=True)
     os.makedirs(models_path / "predictive", exist_ok=True)
@@ -214,14 +214,16 @@ def main(parser) -> None:
         # )
         global_logger.info(f"Logging to: {log_file_paths}\nOutputs to: {ouputs_path}")
 
+    global_logger.info(f"Results will be saved to {json_out_path}")
+
     if args.config_from_file != "":
         global_logger.info(f"Reading config from: {args.config_from_file}")
     
+    total_iters = args.total_iters
+
     if args.seed is not None:
         arg_seeds = np.array(args.seed)
-        total_iters = len(arg_seeds)
     else:
-        total_iters = args.total_iters
         arg_seeds = np.random.randint(1000, 5000, (total_iters,))
 
     # global_logger.info(args)
@@ -284,7 +286,7 @@ def main(parser) -> None:
                     num_itrs = args.gnn_num_hid_layers,
                 )
             )
-        elif args.dataset in ["GOODTwitch", "GOODWebKB", "GOODCBAS"]:
+        elif args.dataset in ["GOODTwitch", "GOODWebKB", "GOODCBAS", "GOODCora", "GOODArxiv"]:
             dataset, embeds_dists = gen_ds.get_graph_dataset(
                 args.dataset,
                 store_to_path = "./data",
@@ -314,7 +316,8 @@ def main(parser) -> None:
                 report_ds_stats = True if i == 0 else False,
                 encoder_config = dict(
                     num_itrs = args.gnn_num_hid_layers,
-                )
+                ),
+                subgraph_node_ratio = args.dataset_subgraph_node_ratio,
             )
         elif args.dataset in ["Cora_ML", "CiteSeer", "DBLP", "PubMed", "Cora", "Computers", "Photo", "Physics", "CS"]:
             dataset, embeds_dists = gen_ds.get_graph_dataset(
@@ -346,7 +349,8 @@ def main(parser) -> None:
                 report_ds_stats = True if i == 0 else False,
                 encoder_config = dict(
                     num_itrs = args.gnn_num_hid_layers,
-                )
+                ),
+                subgraph_node_ratio = args.dataset_subgraph_node_ratio,
             )
         elif args.dataset in ["Anaheim", "ChicagoSketch", "twitch_PTBR", "county_education_2012", "county_election_2016", "county_income_2012", "county_unemployment_2012"]:
             dataset, embeds_dists = gen_ds.get_graph_dataset(
@@ -379,13 +383,16 @@ def main(parser) -> None:
                 report_ds_stats = True if i == 0 else False,
                 encoder_config = dict(
                     num_itrs = args.gnn_num_hid_layers,
-                )
+                ),
+                subgraph_node_ratio = args.dataset_subgraph_node_ratio,
             )
         else:
             raise Exception("Dataset is not supported")
 
         if i == 0:
             embeds_dists_memory = embeds_dists
+
+        cumulative_time = 0
 
         if args.dataset.lower().startswith("good"):
             model_config = Munch(dict(
@@ -484,10 +491,13 @@ def main(parser) -> None:
         n_test = test_outs["x"].shape[0]
 
         if args.with_standard_scalar or (args.latent_pca_n_components > 0):
+            start = time.time()
             scaler = StandardScaler(with_std=False)
             cal_outs["x"] = scaler.fit_transform(cal_outs["x"])
             test_outs["x"] = scaler.transform(test_outs["x"])
             all_outs["x"] = scaler.transform(all_outs["x"])
+            end = time.time()
+            cumulative_time += (end - start)
 
         if args.importance_weighting in ["input", "latent"]:
             split_char = args.dataset + "_"
@@ -545,6 +555,7 @@ def main(parser) -> None:
 
         pca_config = None
         if args.latent_pca_n_components > 0:
+            start = time.time()
             pca_config = {
                 "sample_original_space": args.sample_original_space,
                 "with_dynamic_bandwidth": args.with_dynamic_bandwidth
@@ -557,6 +568,8 @@ def main(parser) -> None:
                 test_outs["x"] = pca.transform(test_outs["x"])
                 all_outs["x"] = pca.transform(all_outs["x"])
                 pca_config["transform_x"] = True
+            end = time.time()
+            cumulative_time += (end - start)
 
         if args.visualize_data:
             if cal_outs["x"].shape[-1] == 2:
@@ -583,6 +596,7 @@ def main(parser) -> None:
                 print("Cannot visualize feature above 3 dimensions!")
 
         conf_extra_args = {}
+        start = time.time()
         if args.method == "split_cp":
             cp_model = SplitCP(
                 alpha = args.alpha,
@@ -592,6 +606,44 @@ def main(parser) -> None:
                     method = args.conformal_eval_method,
                     wsc_num_vectors = args.wsc_num_vectors
                 ),
+            )
+        elif args.method == "aps":
+            cp_model = APS(
+                alpha = args.alpha,
+                task = dataset.task,
+                device = device,
+                eval_config = dict(
+                    method = args.conformal_eval_method,
+                    wsc_num_vectors = args.wsc_num_vectors
+                ),
+            )
+        elif args.method == "naps":
+            cp_model = NAPS(
+                alpha = args.alpha,
+                batch_size = args.cp_batch_size,
+                k_hops = 2,
+                weight_analysis_metrics = {
+                    "entropy": {},
+                    "center_of_mass": {},
+                    "cumulative_weight": {"quantile": 0.5}
+                },
+                task = dataset.task,
+                device = device,
+                eval_config = dict(
+                    method = args.conformal_eval_method,
+                    wsc_num_vectors = args.wsc_num_vectors
+                ),
+            )
+        elif args.method == "snaps":
+            cp_model = SNAPS(
+                alpha = args.alpha,
+                task = dataset.task,
+                device = device,
+                eval_config = dict(
+                    method = args.conformal_eval_method,
+                    wsc_num_vectors = args.wsc_num_vectors
+                ),
+                base_method = args.base_method
             )
         elif args.method == "cal_lcp":
             cp_model = CalibratedLocalizedCP(
@@ -635,7 +687,8 @@ def main(parser) -> None:
                     "in_dropout": 0.5,
                     "hid_dropout": 0.0,
                     "out_dropout": 0.0,
-                })
+                }),
+                base_method = args.base_method
             )
             conf_extra_args |= dict(dataset=dataset)
         elif args.method == "rand_lcp":
@@ -683,6 +736,7 @@ def main(parser) -> None:
                     method = args.conformal_eval_method,
                     wsc_num_vectors = args.wsc_num_vectors
                 ),
+                base_method = args.base_method
             )
             conf_extra_args |= dict(dataset = dataset)
         elif args.method == "test_cp":
@@ -719,12 +773,16 @@ def main(parser) -> None:
             test_outs = test_outs,
             pre_weights = pre_weights,
             pca_config = pca_config,
-            dataset = dataset
+            dataset = dataset,
+            num_runs = args.num_runs_per_dataset,
         )
+        end = time.time()
+        cumulative_time += (end - start)
+        cp_results |= dict(running_time = cumulative_time)
         update_results(cp_results)
 
     global_logger.info(f"Args seeds: [{', '.join(arg_seeds.astype(str))}]")
-    global_logger.info(f"Pretrained models are saved to {models_path} as: [{', '.join([p.replace('/workspace/CertainGNN', '.') for p in pretrained_paths])}]")
+    global_logger.info(f"Pretrained models are saved to {models_path} as: [{', '.join([p.replace('/workspace/GraphLCP', '.') for p in pretrained_paths])}]")
 
     if "predictions" in all_results:
         predictions = all_results.pop("predictions")
@@ -763,6 +821,7 @@ def main(parser) -> None:
     global_logger.info(log_content)
 
     with open(json_out_path, "w") as f:
+        global_logger.info(f"Saving final results to {json_out_path}")
         json.dump(output_dict, f, indent=4)
 
 

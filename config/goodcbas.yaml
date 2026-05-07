@@ -1,0 +1,58 @@
+gnn_weight_decay: 0.0
+gnn_type: gcn
+gnn_pooling_mode: mean
+gnn_num_hid_layers: 3
+gnn_n_epochs: 200 # GOOD: 300
+gnn_eval_step: 50
+gnn_h_dim: 128 # GOOD: 300
+gnn_lr: 0.001
+gnn_scheduler_step_size: 100
+gnn_scheduler_gamma: 0.1
+gnn_batch_size: 2048 # GOOD: 32
+gnn_dropout_rate: 0.5
+total_iters: 10
+wsc_num_vectors: 100
+method: graph_rlcp
+base_method: split
+dataset: GOODCBAS
+dataset_domain: color
+dataset_shift: covariate
+dataset_generate: false
+dataset_cal_domain: id
+dataset_test_domain: id
+train_loader_type: neighbor
+node_loader_walker_steps: 10
+node_loader_walker_coverage: 100
+dataset_n_partitions: 3
+dataset_subgraph_node_ratio: null
+data_normal_mode: none
+partitioning_granularity_level: 0.2
+pretrained_path: [./pretrained/predictive/gcn_GOODCBAS_2025-09-21-14-22-49.pt, ./pretrained/predictive/gcn_GOODCBAS_2025-09-21-14-24-05.pt, ./pretrained/predictive/gcn_GOODCBAS_2025-09-21-14-25-18.pt, ./pretrained/predictive/gcn_GOODCBAS_2025-09-21-14-26-33.pt, ./pretrained/predictive/gcn_GOODCBAS_2025-09-21-14-27-47.pt, ./pretrained/predictive/gcn_GOODCBAS_2025-09-21-14-29-01.pt, ./pretrained/predictive/gcn_GOODCBAS_2025-09-21-14-30-16.pt, ./pretrained/predictive/gcn_GOODCBAS_2025-09-21-14-31-30.pt, ./pretrained/predictive/gcn_GOODCBAS_2025-09-21-14-32-43.pt, ./pretrained/predictive/gcn_GOODCBAS_2025-09-21-14-33-56.pt]
+cp_batch_size: 1024
+train_test_split:
+- 0.60
+- 0.30
+seed: [1088, 4016, 3069, 3498, 2672, 4072, 2397, 4118, 3967, 4927]
+experiment_id: null
+importance_weighting: nothing
+weighting_method: convex
+with_standard_scalar: true
+with_dynamic_bandwidth: true
+sample_original_space: false
+input_transformation_type: nothing
+importance_weighting_batch_size: 4096
+importance_weighting_reg_fac: 0.001
+importance_weighting_max_iters: 5
+importance_weighting_kernelwidth_quantile: 0.5
+importance_weighting_kmm_b: 100
+input_pca_n_components: 0
+latent_pca_n_components: 0
+alpha: 0.1
+bandwidth: 2.0
+ppr_alpha: 0.2
+ppr_k: 30
+convex_dist_coeff: 1.0
+convex_coeff_method: degree
+graph_densification_threshold: 0.5
+graph_densification_method: rbf
+adapt_dense_threshold: true

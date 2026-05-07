@@ -78,6 +78,7 @@ def evaluate(model, dataset, target_dataset = "cal", metric_eval = True):
         labels = labels.view(n_samples, n_cls)
         pearson_ratio = pearsonr(scores.view(-1).cpu().numpy(), labels.view(-1).cpu().numpy())
         outs["pearson_ratio"] = pearson_ratio.statistic
+        logits = scores
     else:
         binary_task = False if dataset.n_classes > 2 else True
         f1 = F1Score(
@@ -105,11 +106,13 @@ def evaluate(model, dataset, target_dataset = "cal", metric_eval = True):
         if binary_task:
             scores = scores.view(-1, 1)
             scores = torch.cat(((1. - scores).abs(), scores), dim=1)
+            logits = logits.view(-1, 1)
         
     outs["x"] = x
     outs["labels"] = labels
     outs["loss"] = loss_func(logits, labels, reduction="mean")
     outs["scores"] = scores
+    outs["logits"] = logits
 
     return outs
 

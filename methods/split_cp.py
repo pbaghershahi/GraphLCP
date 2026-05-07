@@ -59,5 +59,10 @@ class SplitCP(BaseCP):
             )
         else:
             test_conf_pred = test_nc_scores <= quantile_thresh
-    
-        return test_conf_pred, quantile_thresh
+
+        outputs = {
+            "test_predictions": test_conf_pred,
+            "quantile_thresholds": quantile_thresh,
+        }
+        
+        return outputs

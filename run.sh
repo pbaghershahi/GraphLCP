@@ -10,8 +10,6 @@ datasets=("anaheim" "education")
 sos_options=("")
 iw_options=("")
 methods=("graph_rlcp")
-kmm_b=("1")
-convex_dist_coeffs=("1.0")
 ppr_ks=("30")
 convex_coeff_methods=("degree")
 graph_densification_method=("rbf")
@@ -29,32 +27,23 @@ for method in "${methods[@]}"; do
             for alpha in "${alpha_values[@]}"; do
                 for sos_flag in "${sos_options[@]}"; do
                     for iw in "${iw_options[@]}"; do
-                        for k_b in "${kmm_b[@]}"; do
-                            for ccm in "${convex_coeff_methods[@]}"; do
-                                for gdt in "${graph_densification_threshold[@]}"; do
-                                    for gdm in "${graph_densification_method[@]}"; do
-                                        for ppr_k in "${ppr_ks[@]}"; do
-                                            python main.py \
-                                            -cff ./config/$dataset.yaml \
-                                            -a $alpha \
-                                            -m $method \
-                                            -b $bandwidth \
-                                            -dtd id \
-                                            $sos_flag \
-                                            -eid $EXP_ID \
-                                            -wdb \
-                                            $wss_flag \
-                                            -tt 10 \
-                                            -pk $ppr_k \
-                                            -cdc 1.0 \
-                                            -gdt $gdt \
-                                            -ccm $ccm \
-                                            -gdm $gdm \
-                                            -cem ${conformal_eval_method[*]} \
-                                            -dnp 3 \
-                                            -wm $wm \
-                                            -wnv 100
-                                        done
+                        for ccm in "${convex_coeff_methods[@]}"; do
+                            for gdt in "${graph_densification_threshold[@]}"; do
+                                for gdm in "${graph_densification_method[@]}"; do
+                                    for ppr_k in "${ppr_ks[@]}"; do
+                                        python main.py \
+                                        -cff ./config/$dataset.yaml \
+                                        -a $alpha \
+                                        -m $method \
+                                        -b $bandwidth \
+                                        $sos_flag \
+                                        -eid $EXP_ID \
+                                        $wss_flag \
+                                        -pk $ppr_k \
+                                        -gdt $gdt \
+                                        -ccm $ccm \
+                                        -gdm $gdm \
+                                        -cem ${conformal_eval_method[*]}
                                     done
                                 done
                             done

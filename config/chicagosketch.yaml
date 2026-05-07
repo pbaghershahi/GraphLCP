@@ -1,0 +1,62 @@
+gnn_with_bn: false
+gnn_with_nonlinearity: true
+gnn_weight_decay: 0.0
+gnn_type: gcn
+gnn_pooling_mode: mean
+gnn_num_hid_layers: 2
+gnn_n_epochs: 200
+gnn_eval_step: 50
+gnn_h_dim: 64
+gnn_lr: 0.001
+gnn_scheduler_step_size: 100
+gnn_scheduler_gamma: 0.1
+gnn_batch_size: 2048
+gnn_dropout_rate: 0.2
+total_iters: 10
+wsc_num_vectors: 100
+method: graph_rlcp
+base_method: split
+dataset: ChicagoSketch
+dataset_domain: university
+dataset_shift: covariate
+dataset_generate: false
+dataset_cal_domain: id
+dataset_test_domain: id
+train_loader_type: neighbor
+node_loader_walker_steps: 10
+node_loader_walker_coverage: 100
+dataset_n_partitions: 3
+dataset_subgraph_node_ratio: null
+data_normal_mode: none
+partitioning_granularity_level: 0.2
+pretrained_path: [./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-09.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-13.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-16.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-20.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-22.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-25.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-28.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-31.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-34.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-37.pt]
+# seed: [1199, 3961, 4383, 3779, 2921, 2683, 1643, 3413, 4974, 1167, 3223, 4429, 2404, 1064, 1172, 4643, 3168, 2050, 2538, 3733]
+# pretrained_path: [./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-09.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-13.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-16.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-20.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-22.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-25.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-28.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-31.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-34.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-37.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-40.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-43.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-47.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-50.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-53.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-56.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-39-59.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-40-03.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-40-06.pt, ./pretrained/predictive/gcn_ChicagoSketch_2025-12-16-04-40-10.pt]
+cp_batch_size: 1024
+train_test_split:
+- 0.50
+- 0.40
+seed: [1199, 3961, 4383, 3779, 2921, 2683, 1643, 3413, 4974, 1167]
+experiment_id: null
+importance_weighting: nothing
+weighting_method: convex
+with_standard_scalar: false
+with_dynamic_bandwidth: false
+sample_original_space: false
+input_transformation_type: nothing
+importance_weighting_batch_size: 4096
+importance_weighting_reg_fac: 0.001
+importance_weighting_max_iters: 5
+importance_weighting_kernelwidth_quantile: 0.5
+importance_weighting_kmm_b: 100
+input_pca_n_components: 0
+latent_pca_n_components: 5
+alpha: 0.1
+bandwidth: 2.0
+ppr_alpha: 0.2
+ppr_k: 30
+convex_dist_coeff: 1.0
+convex_coeff_method: degree
+graph_densification_threshold: 0.5
+graph_densification_method: rbf
+adapt_dense_threshold: false
