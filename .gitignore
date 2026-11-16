@@ -1,0 +1,22 @@
+# Python caches
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Runtime artifacts
+/data/*
+!/data/cfgnn_regression/
+/pretrained/
+/log/
+/outputs/
+/analysis_outputs/
+/exp_scripts/outputs/
+
+# Local editor and OS metadata
+.DS_Store
+.idea/
+.vscode/
+
+# Local Python environments
+.venv/
